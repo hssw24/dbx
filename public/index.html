@@ -1,43 +1,146 @@
 <!DOCTYPE html>
-<html lang="en">
-  <head>
-    <meta charset="utf-8" />
-    <link rel="icon" href="%PUBLIC_URL%/favicon.ico" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <meta name="theme-color" content="#000000" />
-    <meta
-      name="description"
-      content="Web site created using create-react-app"
-    />
-    <link rel="apple-touch-icon" href="%PUBLIC_URL%/logo192.png" />
-    <!--
-      manifest.json provides metadata used when your web app is installed on a
-      user's mobile device or desktop. See https://developers.google.com/web/fundamentals/web-app-manifest/
-    -->
-    <link rel="manifest" href="%PUBLIC_URL%/manifest.json" />
-    <!--
-      Notice the use of %PUBLIC_URL% in the tags above.
-      It will be replaced with the URL of the `public` folder during the build.
-      Only files inside the `public` folder can be referenced from the HTML.
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Volume Monitor</title>
+    <style>
+        /* Grundlayout und Warnanimation */
+        body {
+            font-family: Arial, sans-serif;
+        }
 
-      Unlike "/favicon.ico" or "favicon.ico", "%PUBLIC_URL%/favicon.ico" will
-      work correctly both with client-side routing and a non-root public URL.
-      Learn how to configure a non-root public URL by running `npm run build`.
-    -->
-    <title>React xxx App</title>
-  </head>
-  <body>
-    <noscript>You need to enable JavaScript to run this app.</noscript>
-    <div id="root"></div>
-    <!--
-      This HTML file is a template.
-      If you open it directly in the browser, you will see an empty page.
+        .volume-monitor {
+            padding: 20px;
+            transition: background-color 0.3s;
+        }
 
-      You can add webfonts, meta tags, or analytics to this file.
-      The build step will place the bundled scripts into the <body> tag.
+        .volume-monitor.alert {
+            animation: blink-red 0.5s infinite;
+        }
 
-      To begin the development, run `npm start` or `yarn start`.
-      To create a production bundle, use `npm run build` or `yarn build`.
-    -->
-  </body>
+        @keyframes blink-red {
+            0%, 100% { background-color: white; }
+            50% { background-color: red; }
+        }
+
+        .alarm-text {
+            font-size: 72pt;
+            color: black;
+            background-color: red;
+            text-align: center;
+            padding: 20px;
+            border-radius: 10px;
+            margin-top: 20px;
+        }
+    </style>
+</head>
+<body>
+    <div id="volume-monitor" class="volume-monitor">
+        <h1>Volume Monitor</h1>
+        <p id="current-volume">Aktuelle Lautstärke: 0 dB</p>
+        <p id="status">Lautstärke im normalen Bereich</p>
+        <div id="alarm-text" class="alarm-text" style="display: none;">Alarm</div>
+
+        <h3>Wählen Sie den Grenzwert:</h3>
+        <div id="threshold-options"></div>
+    </div>
+
+    <script>
+        const volumeMonitor = document.getElementById('volume-monitor');
+        const currentVolumeDisplay = document.getElementById('current-volume');
+        const statusDisplay = document.getElementById('status');
+        const alarmText = document.getElementById('alarm-text');
+        const thresholdOptions = document.getElementById('threshold-options');
+
+        let threshold = 25; // Standard-Grenzwert auf 25 dB
+        let alarmActive = false;
+
+        // Radiobuttons für Grenzwerte von 20 bis 70 dB in 5er-Schritten
+        for (let value = 20; value <= 70; value += 5) {
+            const label = document.createElement('label');
+            label.style.marginRight = '10px';
+
+            const radio = document.createElement('input');
+            radio.type = 'radio';
+            radio.value = value;
+            radio.name = 'threshold';
+            radio.checked = value === threshold;
+            radio.addEventListener('change', () => {
+                threshold = parseInt(radio.value);
+            });
+
+            label.appendChild(radio);
+            label.appendChild(document.createTextNode(`${value} dB`));
+            thresholdOptions.appendChild(label);
+        }
+
+        // Funktion zur Initialisierung des Audio-Kontexts und der Lautstärkeüberwachung
+        async function initAudio() {
+            const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+            const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+            const microphone = audioContext.createMediaStreamSource(stream);
+            const analyser = audioContext.createAnalyser();
+            analyser.fftSize = 256;
+
+            const dataArray = new Uint8Array(analyser.frequencyBinCount);
+            microphone.connect(analyser);
+
+            // Startet die kontinuierliche Lautstärkeüberwachung
+            function monitorVolume() {
+                analyser.getByteFrequencyData(dataArray);
+                const avgVolume = dataArray.reduce((a, b) => a + b) / dataArray.length;
+                const decibels = 20 * Math.log10(avgVolume + 1); // Umrechnung in dB
+
+                // Anzeige aktualisieren (geglättete Anzeige)
+                const smoothedVolume = (parseFloat(currentVolumeDisplay.textContent.split(': ')[1]) * 0.8 + decibels * 0.2).toFixed(2);
+                currentVolumeDisplay.textContent = `Aktuelle Lautstärke: ${smoothedVolume} dB`;
+
+                // Bedingung für Alarm: wenn Lautstärke höher als Grenzwert und Alarm nicht aktiv
+                if (decibels > threshold && !alarmActive) {
+                    triggerAlarm();
+                } else if (decibels <= threshold) {
+                    statusDisplay.textContent = "Lautstärke im normalen Bereich";
+                }
+
+                requestAnimationFrame(monitorVolume);
+            }
+
+            // Funktion zum Auslösen des Alarms
+            function triggerAlarm() {
+                alarmActive = true;
+                statusDisplay.textContent = "Lautstärke überschritten!";
+                volumeMonitor.classList.add('alert');
+                alarmText.style.display = "block";
+
+                playAlarmSound();
+
+                // Alarm nach 5 Sekunden zurücksetzen
+                setTimeout(() => {
+                    alarmActive = false;
+                    volumeMonitor.classList.remove('alert');
+                    alarmText.style.display = "none";
+                }, 5000);
+            }
+
+            // Erzeugt den Piepton
+            function playAlarmSound() {
+                const beepAudioContext = new (window.AudioContext || window.webkitAudioContext)();
+                const oscillator = beepAudioContext.createOscillator();
+                oscillator.type = 'square';
+                oscillator.frequency.setValueAtTime(440, beepAudioContext.currentTime);
+                oscillator.connect(beepAudioContext.destination);
+                oscillator.start();
+                oscillator.stop(beepAudioContext.currentTime + 0.5);
+            }
+
+            monitorVolume(); // Start der Überwachung
+        }
+
+        initAudio().catch(error => {
+            console.error("Fehler bei der Audioinitialisierung:", error);
+            alert("Audiozugriff erforderlich. Bitte Mikrofonzugriff erlauben.");
+        });
+    </script>
+</body>
 </html>
